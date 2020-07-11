@@ -1,0 +1,68 @@
+
+# Lets create two ec2 instance one for CI with Jenkins and another for storing docker images registry and they will communicate each other with docker agent.
+
+# AWS EC2 INSTANCE 1 (eg: Docker registry instance1_ip=192.168.10.15)
+# Install docker
+sudo apt update
+sudo apt install docker.io
+
+nano /lib/systemd/system/docker.service
+ExecStart=/usr/bin/dockerd -H fd:// -H tcp://0.0.0.0:2375
+systemctl daemon-reload
+systemctl restart docker
+
+docker images
+
+# deploy Portainer for managing docker images
+docker volume create portainer_data
+docker run -d -p 8091:8000 -p 9000:9000 --name=portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer
+
+
+# AWS EC2 INSTANCE 2 (eg: jenkins instance ip=192.168.10.25)
+
+# Install docker
+sudo apt update
+sudo apt install docker.io
+
+nano /lib/systemd/system/docker.service
+ExecStart=/usr/bin/dockerd -H fd:// -H tcp://0.0.0.0:2375
+systemctl daemon-reload
+systemctl restart docker
+
+# run Jenkins through docker image
+docker run -d -u root --name jenkins \
+    -p 8090:8080 -p 50000:50000 \
+    -v /root/jenkins_2112:/var/jenkins_home \
+    jenkins/jenkins
+
+# check key from:
+docker exec -it jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+username: admin
+password: token
+
+# Install Plugin
+Manage Jenkins -> Manage Plugins ->  Available tab -> search Docker -> checkbox Docker (cloud provider) -> Install without Restart -> Go back to Dashboar
+
+#Add Docker Agent
+# Configure Plugin
+Manage Jenkins -> Configure System -> Add a new cloud -> select Docker -> Docker Host URI=tcp://instance1_ip:2375 -> Test Connection -> return Docker version if successful -> enable docker plugin
+
+# Configure Docker Agent Template
+Docker Agent templates -> Add Docker Template -> label=docker-agent, name=docker-agent -> image=benhall/dind-jenkins-agent:v2 -> Container Settings -> Volumes=/var/run/docker.sock:/var/run/docker.sock -> Connect Method -> select Connect with SSH -> enable docker agent -> save.
+
+# Create New Job
+Create new jobs -> Katacoda Jenkins Demo -> Freestyle project -> Label Expression=docker-agent -> Git=https://github.com/katacoda/katacoda-jenkins-demo -> Add Build Step -> select Execute Shell ->
+ls
+docker info
+docker build -t katacoda/jenkins-demo:${BUILD_NUMBER} .
+docker tag katacoda/jenkins-demo:${BUILD_NUMBER} katacoda/jenkins-demo:latest
+docker images
+-> Save
+
+# Build
+Build Now
+docker logs --tail=10 jenkins
+
+
+
+
